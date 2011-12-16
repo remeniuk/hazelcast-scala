@@ -1,0 +1,3 @@
+API for Hazelcast in Scala that will add abstractions for working in concurrent and distributed
+environment in a functional manner (distributed dataflow, actors backed with Hazelcast executors),
+and functional wrappers for Hazelcast distributed collections.
