@@ -7,6 +7,9 @@ import org.specs2.mutable.{After, BeforeAfter, Specification}
 import java.util.concurrent.{TimeUnit, CountDownLatch, ExecutorService}
 import com.hazelcast.scala.HazelcastDistributedTask._
 
+import scalaz._
+import Scalaz._
+
 /**
  * User: remeniuk
  */
@@ -29,16 +32,22 @@ class PiCalculationExample extends Specification {
   "Calculates Pi number in the distributed context" in new manyInstances {
     val clusterMembers = Hazelcast.getCluster.getMembers.asScala.toList
 
+    val task = distributedTask(Hazelcast.getCluster.getLocalMember) {
+      1
+    }
+
+    //new ApplicativeBuilder[({type λ[α]=HazelcastDistributedTask[α, ExecutionNotStarted]})#λ, Int,  Int](task, task)
+
     val result = clusterMembers.zipWithIndex.map {
       case (member, index) =>
         distributedTask(member) {
-          () => Pi.calculate(index * Pi.N)
+          Pi.calculate(index * Pi.N)
         }.execute().get
     } sum
 
     println("Result: " + result)
 
-    result must be closeTo(3.141 +/- 0.001)
+    result must be closeTo (3.141 +/- 0.001)
   }
 
   step {
