@@ -2,3 +2,5 @@
 /.idea_modules
 /project
 /target
+/src/test/scala/com/hazelcast/scala/NumeralSpec.scala
+/src/main/scala/com/hazelcast/scala/ScalazTraining.scala

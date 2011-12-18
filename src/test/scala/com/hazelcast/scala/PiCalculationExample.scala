@@ -32,12 +32,6 @@ class PiCalculationExample extends Specification {
   "Calculates Pi number in the distributed context" in new manyInstances {
     val clusterMembers = Hazelcast.getCluster.getMembers.asScala.toList
 
-    val task = distributedTask(Hazelcast.getCluster.getLocalMember) {
-      1
-    }
-
-    //new ApplicativeBuilder[({type λ[α]=HazelcastDistributedTask[α, ExecutionNotStarted]})#λ, Int,  Int](task, task)
-
     val result = clusterMembers.zipWithIndex.map {
       case (member, index) =>
         distributedTask(member) {

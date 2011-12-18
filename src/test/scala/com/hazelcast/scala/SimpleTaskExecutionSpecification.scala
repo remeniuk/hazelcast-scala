@@ -17,7 +17,7 @@ trait instance extends HazelcastInstances {
 
 class SimpleTaskExecutionSpecification extends Specification {
 
-  /*"Synchronously execute simple task on local member" in {
+  "Synchronously execute simple task on local member" in {
     (distributedTask(Hazelcast.getCluster.getLocalMember) {
       1 + 1
     }).execute().get must beEqualTo(2)
@@ -42,16 +42,14 @@ class SimpleTaskExecutionSpecification extends Specification {
           1
         }).execute().get
     }.sum must beEqualTo(2)
-  } */
+  }
 
-  "Tasks can be flattened" in {
+  "Tasks can be flatMapped" in {
     ((distributedTask(Hazelcast.getCluster.getLocalMember) {
       1
     }).flatMap(Hazelcast.getCluster.getLocalMember) {
       x: Int =>
-        println("====== A ======")
         distributedTask(Hazelcast.getCluster.getLocalMember) {
-          println("====== B ======")
           x + 1
         }
     }).execute().get must be equalTo 2

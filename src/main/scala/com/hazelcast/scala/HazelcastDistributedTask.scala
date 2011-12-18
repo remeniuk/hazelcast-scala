@@ -131,7 +131,6 @@ trait HazelcastDistributedTask[T, TaskState <: TaskExecutionState] {
 
     distributedTaskInstance.setExecutionCallback(new ExecutionCallback[T] {
       def done(future: Future[T]) = {
-        println("====== 1 ======")
         transform.value = future.get(5, TimeUnit.SECONDS)
         unflattenedTask.executeSelf()
       }
@@ -139,10 +138,8 @@ trait HazelcastDistributedTask[T, TaskState <: TaskExecutionState] {
 
     unflattenedTask.distributedTaskInstance.setExecutionCallback(new ExecutionCallback[HazelcastDistributedTask.NotStartedHazelcastTask[K]] {
       def done(future: Future[HazelcastDistributedTask.NotStartedHazelcastTask[K]]) {
-        println("====== 2 ======")
         future.get.distributedTaskInstance.setExecutionCallback(new ExecutionCallback[K] {
           def done(future: Future[K]) {
-            println("====== 3 ======")
             indentity.value = future.get(5, TimeUnit.SECONDS)
             flattenedTask.executeSelf()
           }
