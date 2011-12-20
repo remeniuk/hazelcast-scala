@@ -2,6 +2,7 @@ package org.scalaby.hazelcastwf
 
 import com.hazelcast.core.Hazelcast
 import java.util.concurrent.{TimeUnit, Callable}
+import com.hazelcast.impl.CountDownLatchProxy
 
 /**
  * User: remeniuk
@@ -12,6 +13,8 @@ trait Promise[T] extends Callable[T] with Serializable {
   import DistributedTask._
 
   val taskId: String
+
+  def isCallable = false
 
   def countDownLatch = {
     val c = Hazelcast.getCountDownLatch(taskId)
@@ -31,6 +34,8 @@ trait Promise[T] extends Callable[T] with Serializable {
 class Promise0[T](val taskId: String, f0: () => T) extends Promise[T] {
 
   import DistributedTask._
+
+  override def isCallable = false
 
   def call() = {
     val result = f0()
@@ -66,5 +71,35 @@ class Promise2[A, B, C](val taskId: String, f2: (A, B) => C)
     } else {
       new Promise1[A, C](taskId, f2(_, value.asInstanceOf[B]))
     }
+
+}
+
+case class FoldablePromise[T](taskId: String,
+                              f: (T, T) => T,
+                              count: Int,
+                              state: T => T = _) extends Promise[T] {
+
+  def countDownLatch = {
+    val c = Hazelcast.getCountDownLatch(taskId)
+    if (c.asInstanceOf[CountDownLatchProxy].getCount == 0)
+      c.setCount(count + 1)
+    c
+  }
+
+  def fold(value: T) = {
+    if (DistributedTask.getPromisedValue(taskId) == null) {
+      DistributedTask.storePromisedValue(taskId, value)
+      this
+    } else copy(state = state compose f.curried(value))
+  }
+
+  def isCallable = countDownLatch.asInstanceOf[CountDownLatchProxy].getCount == 1
+
+  def call = {
+    val result = state(DistributedTask.getPromisedValue[T](taskId))
+    DistributedTask.storePromisedValue(taskId, result)
+    countDownLatch.countDown()
+    result
+  }
 
 }

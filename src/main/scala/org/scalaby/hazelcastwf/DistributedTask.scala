@@ -9,6 +9,9 @@ import com.google.common.base.Objects
  * User: remeniuk
  */
 
+
+// TO-DO: LOCK DISTRIBUTED COLLECTIONS!!!
+
 object DistributedTask {
 
   final val TASK_PREFIX = "wf-task:"
@@ -30,12 +33,27 @@ object DistributedTask {
 
   def getPromisedValue[T](key: String) = promisedValuesRepository.get(key).asInstanceOf[T]
 
-  def storePromise[T](id: String, promise: Promise[T]) =
+  def storePromise[T](id: String, promise: Promise[T]) = {
+    promisesRepository.lock(id)
     promisesRepository.put(id, promise)
+    promisesRepository.unlock(id)
+  }
 
   def distributedTask[T](task: () => T): DistributedTask[T] = {
     val res = ExecuteTaskRandomly[T]()
     storePromise(res.id, new Promise0[T](res.id, task))
+    res
+  }
+
+  def reduce[T](tasks: Iterable[DistributedTask[T]])(f: (T, T) => T): DistributedTask[T] = {
+    val res = new ExecuteTaskRandomly[T]() {
+      override implicit val context =
+        ((tasks.head.context /: tasks.tail) {
+          (c, x) => c.join(x.context).addDependency(x, this)
+        }).addTask(this)
+    }
+    storePromise(res.id, new FoldablePromise[T](res.id, f, tasks.size))
+
     res
   }
 
@@ -73,7 +91,7 @@ trait DistributedTask[T] {
 
   def createDistributedTask = {
     val promise = getPromise
-    if (promise.isInstanceOf[Promise0[_]]) Some(new HazelcastDistributedTask[T](getPromise))
+    if (promise.isCallable) Some(new HazelcastDistributedTask[T](getPromise))
     else None
   }
 
@@ -93,6 +111,8 @@ trait DistributedTask[T] {
                       storePromise(dependency.id, promise.curry(future.get))
                     case promise: Promise1[T, _] =>
                       storePromise(dependency.id, promise.curry(future.get))
+                    case promise: FoldablePromise[T] =>
+                      storePromise(dependency.id, promise.fold(future.get))
                     case _ => //throw new IllegalStateException("Unsupported promise type!")
                   }
                 } finally {
