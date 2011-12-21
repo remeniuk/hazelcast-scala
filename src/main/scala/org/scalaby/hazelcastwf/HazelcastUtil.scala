@@ -1,6 +1,8 @@
 package org.scalaby.hazelcastwf
 
-import com.hazelcast.core.Hazelcast
+import com.hazelcast.core.{Member, Hazelcast}
+import scala.collection.JavaConverters._
+
 
 /**
  * User: remeniuk
@@ -17,5 +19,9 @@ object HazelcastUtil {
       lock.unlock()
     }
   }
+
+  def clusterMembers: Set[Member] = Hazelcast.getCluster.getMembers.asScala.toSet
+
+  def clusterMembersList: List[Member] = clusterMembers.toList
 
 }

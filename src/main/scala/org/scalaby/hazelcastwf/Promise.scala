@@ -66,16 +66,16 @@ class Promise1[A, B](val taskId: String, f1: A => B)
 }
 
 class Promise2[A, B, C](val taskId: String, f2: (A, B) => C)
-                       (implicit first: ClassManifest[A])
+                       (implicit second: ClassManifest[B])
   extends Promise[C] with PartiallyAppliable[Any, C] {
 
   def call() = throw new IllegalStateException("Cannot execute promise directly")
 
   def partiallyApply(value: Any): Promise[C] =
-    if (value.asInstanceOf[AnyVal].getClass.isAssignableFrom(Primitives.box(first.erasure))) {
-      new Promise1[B, C](taskId, f2(value.asInstanceOf[A], _))
-    } else {
+    if (value.asInstanceOf[AnyVal].getClass.isAssignableFrom(Primitives.box(second.erasure))) {
       new Promise1[A, C](taskId, f2(_, value.asInstanceOf[B]))
+    } else {
+      new Promise1[B, C](taskId, f2(value.asInstanceOf[A], _))
     }
 
 }

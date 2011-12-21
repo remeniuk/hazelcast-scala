@@ -14,7 +14,7 @@ import HazelcastScalaz._
 
 class ScalazHazelacast extends Specification {
 
-  "Reduce tasks sequentially" in {
+  /*"Reduce tasks sequentially" in {
     val taskA = distributedTask {
       () => "A"
     }.onMember(Hazelcast.getCluster.getLocalMember)
@@ -24,7 +24,7 @@ class ScalazHazelacast extends Specification {
     }.onMember(Hazelcast.getCluster.getLocalMember)
 
     (taskA |@| taskB)(_ + _).apply() must be equalTo "AB"
-  }
+  } */
 
   step {
     Hazelcast.shutdownAll()

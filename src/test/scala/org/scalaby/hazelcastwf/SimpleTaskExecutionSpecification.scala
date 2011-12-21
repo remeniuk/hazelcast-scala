@@ -3,6 +3,7 @@ package org.scalaby.hazelcastwf
 import com.hazelcast.core.Hazelcast
 import org.specs2.mutable.Specification
 import DistributedTask._
+import scala.collection.JavaConverters._
 
 /**
  * User: remeniuk
@@ -60,13 +61,20 @@ class SimpleTaskExecutionSpecification extends Specification {
       () => "2"
     }.onMember(Hazelcast.getCluster.getLocalMember)
 
-    join(taskA, taskB)(_.toString + _).map(_.toInt)() must be equalTo 12
+    val taskC = distributedTask {
+      () => 1
+    }.onMember(Hazelcast.getCluster.getLocalMember)
+
+    taskA
+      .join(taskB)(_.toString + _)
+      .join(taskC)(_.length + _)
+      .map(_.toDouble)() must be equalTo 3d
   }
 
   "Reduce tasks in a parallel (Pi calculation)" in {
 
     val result = reduce(
-      Seq.fill(5)(Hazelcast.getCluster.getLocalMember).zipWithIndex.map {
+      HazelcastUtil.clusterMembersList.zipWithIndex.map {
         case (member, index) =>
           distributedTask {
             () => Pi.calculate(index * Pi.N)
@@ -76,6 +84,11 @@ class SimpleTaskExecutionSpecification extends Specification {
 
     result must be closeTo (3.141 +/- 0.001)
 
+  }
+
+  "Reduce multitask" in new additionalInstance {
+    multiTask(HazelcastUtil.clusterMembers)(() => 1)
+      .map(_.sum)() must be equalTo 2
   }
 
   step {
