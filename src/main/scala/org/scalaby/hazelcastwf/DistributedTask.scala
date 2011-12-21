@@ -4,20 +4,15 @@ import com.hazelcast.core.{ExecutionCallback, Member, Hazelcast, DistributedTask
 import java.util.concurrent.Future
 import com.google.common.base.Objects
 
-
 /**
  * User: remeniuk
  */
 
 
-// TO-DO: LOCK DISTRIBUTED COLLECTIONS!!!
-
 object DistributedTask {
 
   final val TASK_PREFIX = "wf-task:"
   final val ID_GENERATOR = "hazelcast-wh"
-  final val PROMISES_REPOSITORY = "wf-promises-repository"
-  final val PROMISED_VALUES_REPOSITORY = "wf-promised-values-repository"
   final val PROMISES_EXECUTOR = "wf-promises-executor"
   final val TASK_DEPENDENCIES = "wf-task-deps"
 
@@ -25,23 +20,9 @@ object DistributedTask {
 
   def executor = Hazelcast.getExecutorService(PROMISES_EXECUTOR)
 
-  def promisesRepository[V] = Hazelcast.getMap[String, Promise[V]](PROMISES_REPOSITORY)
-
-  def promisedValuesRepository = Hazelcast.getMap[String, Any](PROMISED_VALUES_REPOSITORY)
-
-  def storePromisedValue[T](key: String, value: T) = promisedValuesRepository.put(key, value)
-
-  def getPromisedValue[T](key: String) = promisedValuesRepository.get(key).asInstanceOf[T]
-
-  def storePromise[T](id: String, promise: Promise[T]) = {
-    promisesRepository.lock(id)
-    promisesRepository.put(id, promise)
-    promisesRepository.unlock(id)
-  }
-
   def distributedTask[T](task: () => T): DistributedTask[T] = {
     val res = ExecuteTaskRandomly[T]()
-    storePromise(res.id, new Promise0[T](res.id, task))
+    Promises.put(res.id, new Promise0[T](res.id, task))
     res
   }
 
@@ -52,7 +33,7 @@ object DistributedTask {
           (c, x) => c.join(x.context).addDependency(x, this)
         }).addTask(this)
     }
-    storePromise(res.id, new FoldablePromise[T](res.id, f, tasks.size))
+    Promises.put(res.id, new FoldablePromise[T](res.id, f, tasks.size))
 
     res
   }
@@ -65,7 +46,7 @@ object DistributedTask {
           .addDependency(b, this)
           .addTask(this)
     }
-    storePromise(res.id, new Promise2[A, B, C](res.id, f))
+    Promises.put(res.id, new Promise2[A, B, C](res.id, f))
 
     res
   }
@@ -87,11 +68,9 @@ trait DistributedTask[T] {
   } getOrElse (Context()))
     .addTask(this)
 
-  protected def getPromise = promisesRepository[T].get(id)
-
   def createDistributedTask = {
-    val promise = getPromise
-    if (promise.isCallable) Some(new HazelcastDistributedTask[T](getPromise))
+    val promise = Promises.get[T](id)
+    if (promise.isCallable) Some(new HazelcastDistributedTask[T](promise))
     else None
   }
 
@@ -103,17 +82,17 @@ trait DistributedTask[T] {
           dependency =>
             task.setExecutionCallback(new ExecutionCallback[T] {
               def done(future: Future[T]) = {
-                val promiseLock = Hazelcast.getLock("promise" + dependency.id)
+                val promiseLock = Hazelcast.getLock("promise:" + dependency.id)
                 promiseLock.lock()
                 try {
-                  promisesRepository[T].get(dependency.id) match {
+                  Promises.get[T](dependency.id) match {
                     case promise: Promise2[T, _, _] =>
-                      storePromise(dependency.id, promise.curry(future.get))
+                      Promises.put(dependency.id, promise.curry(future.get))
                     case promise: Promise1[T, _] =>
-                      storePromise(dependency.id, promise.curry(future.get))
+                      Promises.put(dependency.id, promise.curry(future.get))
                     case promise: FoldablePromise[T] =>
-                      storePromise(dependency.id, promise.fold(future.get))
-                    case _ => //throw new IllegalStateException("Unsupported promise type!")
+                      Promises.put(dependency.id, promise.fold(future.get))
+                    case _ => throw new IllegalStateException("Unsupported promise type!")
                   }
                 } finally {
                   promiseLock.unlock()
@@ -131,13 +110,13 @@ trait DistributedTask[T] {
     this
   }
 
-  def get = getPromise.get
+  def get = Promises.get[T](id).get
 
   def onMember(member: Member): DistributedTask[T] = ExecuteDistributedTaskOnMember[T](member, id)(parent)
 
   def map[V](f: T => V): DistributedTask[V] = {
     val task = ExecuteTaskRandomly[V]()
-    storePromise(task.id, new Promise1[T, V](task.id, f))
+    Promises.put(task.id, new Promise1[T, V](task.id, f))
     task
   }
 
@@ -145,12 +124,12 @@ trait DistributedTask[T] {
     val unflattenedTask = ExecuteTaskRandomly[DistributedTask[V]]()
     val flattenedTask = ExecuteTaskRandomly[V]()(Some(unflattenedTask))
 
-    storePromise(flattenedTask.id, new Promise1[DistributedTask[V], V](flattenedTask.id, {
+    Promises.put(flattenedTask.id, new Promise1[DistributedTask[V], V](flattenedTask.id, {
       task: DistributedTask[V] => task().get
     }
     ))
 
-    storePromise(unflattenedTask.id, new Promise1[T, DistributedTask[V]](unflattenedTask.id, f))
+    Promises.put(unflattenedTask.id, new Promise1[T, DistributedTask[V]](unflattenedTask.id, f))
 
     flattenedTask
   }
@@ -174,8 +153,8 @@ case class ExecuteDistributedTaskOnMember[T](member: Member,
   extends DistributedTask[T] {
 
   override def createDistributedTask = {
-    val promise = getPromise
-    if (promise.isInstanceOf[Promise0[_]]) Some(new HazelcastDistributedTask[T](getPromise, member))
+    val promise = Promises.get[T](id)
+    if (promise.isInstanceOf[Promise0[_]]) Some(new HazelcastDistributedTask[T](promise, member))
     else None
   }
 

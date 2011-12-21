@@ -24,7 +24,7 @@ trait Promise[T] extends Callable[T] with Serializable {
 
   def get = {
     countDownLatch.await(5, TimeUnit.SECONDS)
-    getPromisedValue[T](taskId)
+    Promises.getResult[T](taskId)
   }
 
   def isFulfilled = !countDownLatch.hasCount
@@ -35,7 +35,7 @@ class Promise0[T](val taskId: String, f0: () => T) extends Promise[T] {
 
   import DistributedTask._
 
-  override def isCallable = false
+  override def isCallable = true
 
   def call() = {
     val result = f0()
@@ -44,7 +44,7 @@ class Promise0[T](val taskId: String, f0: () => T) extends Promise[T] {
   }
 
   def fulfill(result: T) = {
-    storePromisedValue(taskId, result)
+    Promises.putResult(taskId, result)
     countDownLatch.countDown()
   }
 
@@ -77,27 +77,27 @@ class Promise2[A, B, C](val taskId: String, f2: (A, B) => C)
 case class FoldablePromise[T](taskId: String,
                               f: (T, T) => T,
                               count: Int,
-                              state: T => T = _) extends Promise[T] {
+                              state: T => T = (x: T) => x) extends Promise[T] {
 
-  def countDownLatch = {
+  override def countDownLatch = {
     val c = Hazelcast.getCountDownLatch(taskId)
     if (c.asInstanceOf[CountDownLatchProxy].getCount == 0)
       c.setCount(count + 1)
     c
   }
 
+  override def isCallable = countDownLatch.asInstanceOf[CountDownLatchProxy].getCount == 1
+
   def fold(value: T) = {
-    if (DistributedTask.getPromisedValue(taskId) == null) {
-      DistributedTask.storePromisedValue(taskId, value)
+    if (Promises.getResult(taskId) == null) {
+      Promises.putResult(taskId, value)
       this
     } else copy(state = state compose f.curried(value))
   }
 
-  def isCallable = countDownLatch.asInstanceOf[CountDownLatchProxy].getCount == 1
-
   def call = {
-    val result = state(DistributedTask.getPromisedValue[T](taskId))
-    DistributedTask.storePromisedValue(taskId, result)
+    val result = state(Promises.getResult[T](taskId))
+    Promises.putResult(taskId, result)
     countDownLatch.countDown()
     result
   }
