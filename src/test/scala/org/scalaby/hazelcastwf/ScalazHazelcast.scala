@@ -23,7 +23,7 @@ class ScalazHazelacast extends Specification {
       () => "B"
     }.onMember(Hazelcast.getCluster.getLocalMember)
 
-    (taskA |@| taskB)(_ + _).apply().get must be equalTo "AB"
+    (taskA |@| taskB)(_ + _).apply() must be equalTo "AB"
   }
 
   step {

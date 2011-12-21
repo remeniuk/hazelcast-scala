@@ -31,6 +31,12 @@ trait Promise[T] extends Callable[T] with Serializable {
 
 }
 
+trait PartiallyAppliable[A, B] {
+
+  def partiallyApply(value: A): Promise[B]
+
+}
+
 class Promise0[T](val taskId: String, f0: () => T) extends Promise[T] {
 
   import DistributedTask._
@@ -51,21 +57,21 @@ class Promise0[T](val taskId: String, f0: () => T) extends Promise[T] {
 }
 
 class Promise1[A, B](val taskId: String, f1: A => B)
-  extends Promise[B] {
+  extends Promise[B] with PartiallyAppliable[A, B] {
 
   def call() = throw new IllegalStateException("Cannot execute promise directly")
 
-  def curry(value: A) = new Promise0[B](taskId, () => f1(value))
+  def partiallyApply(value: A): Promise[B] = new Promise0[B](taskId, () => f1(value))
 
 }
 
 class Promise2[A, B, C](val taskId: String, f2: (A, B) => C)
                        (implicit first: ClassManifest[A])
-  extends Promise[B] {
+  extends Promise[C] with PartiallyAppliable[Any, C] {
 
   def call() = throw new IllegalStateException("Cannot execute promise directly")
 
-  def curry(value: Any) =
+  def partiallyApply(value: Any): Promise[C] =
     if (value.asInstanceOf[AnyVal].getClass.isAssignableFrom(Primitives.box(first.erasure))) {
       new Promise1[B, C](taskId, f2(value.asInstanceOf[A], _))
     } else {
@@ -77,7 +83,10 @@ class Promise2[A, B, C](val taskId: String, f2: (A, B) => C)
 case class FoldablePromise[T](taskId: String,
                               f: (T, T) => T,
                               count: Int,
-                              state: T => T = (x: T) => x) extends Promise[T] {
+                              state: T => T = (x: T) => x)
+  extends Promise[T] with PartiallyAppliable[T, T] {
+
+  override def isCallable = countDownLatch.asInstanceOf[CountDownLatchProxy].getCount == 1
 
   override def countDownLatch = {
     val c = Hazelcast.getCountDownLatch(taskId)
@@ -86,9 +95,8 @@ case class FoldablePromise[T](taskId: String,
     c
   }
 
-  override def isCallable = countDownLatch.asInstanceOf[CountDownLatchProxy].getCount == 1
-
-  def fold(value: T) = {
+  def partiallyApply(value: T): Promise[T] = {
+    countDownLatch.countDown()
     if (Promises.getResult(taskId) == null) {
       Promises.putResult(taskId, value)
       this

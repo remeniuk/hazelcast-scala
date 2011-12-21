@@ -31,7 +31,7 @@ object DistributedTask {
       override implicit val context =
         ((tasks.head.context /: tasks.tail) {
           (c, x) => c.join(x.context).addDependency(x, this)
-        }).addTask(this)
+        }).addDependency(tasks.head, this).addTask(this)
     }
     Promises.put(res.id, new FoldablePromise[T](res.id, f, tasks.size))
 
@@ -80,26 +80,20 @@ trait DistributedTask[T] {
 
         ctx.getDependecies(this).foreach {
           dependency =>
+
             task.setExecutionCallback(new ExecutionCallback[T] {
               def done(future: Future[T]) = {
-                val promiseLock = Hazelcast.getLock("promise:" + dependency.id)
-                promiseLock.lock()
-                try {
+                HazelcastUtil.locked("promise:" + dependency.id) {
                   Promises.get[T](dependency.id) match {
-                    case promise: Promise2[T, _, _] =>
-                      Promises.put(dependency.id, promise.curry(future.get))
-                    case promise: Promise1[T, _] =>
-                      Promises.put(dependency.id, promise.curry(future.get))
-                    case promise: FoldablePromise[T] =>
-                      Promises.put(dependency.id, promise.fold(future.get))
+                    case promise: PartiallyAppliable[T, _] =>
+                      Promises.put(dependency.id, promise.partiallyApply(future.get))
                     case _ => throw new IllegalStateException("Unsupported promise type!")
                   }
-                } finally {
-                  promiseLock.unlock()
                 }
                 dependency.execute(ctx)
               }
             })
+
         }
 
         executor.execute(task)
@@ -107,10 +101,10 @@ trait DistributedTask[T] {
 
   def apply() = {
     context.roots.foreach(_.execute(context))
-    this
+    Promises.get[T](id).get
   }
 
-  def get = Promises.get[T](id).get
+  def get = apply()
 
   def onMember(member: Member): DistributedTask[T] = ExecuteDistributedTaskOnMember[T](member, id)(parent)
 
@@ -124,10 +118,7 @@ trait DistributedTask[T] {
     val unflattenedTask = ExecuteTaskRandomly[DistributedTask[V]]()
     val flattenedTask = ExecuteTaskRandomly[V]()(Some(unflattenedTask))
 
-    Promises.put(flattenedTask.id, new Promise1[DistributedTask[V], V](flattenedTask.id, {
-      task: DistributedTask[V] => task().get
-    }
-    ))
+    Promises.put(flattenedTask.id, new Promise1[DistributedTask[V], V](flattenedTask.id, _()))
 
     Promises.put(unflattenedTask.id, new Promise1[T, DistributedTask[V]](unflattenedTask.id, f))
 

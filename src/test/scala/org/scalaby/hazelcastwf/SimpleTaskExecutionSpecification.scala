@@ -8,13 +8,21 @@ import DistributedTask._
  * User: remeniuk
  */
 
+object Pi {
+
+  val N = 10000
+
+  def calculate(start: Int): Double = (start until (start + N))
+    .map(i => 4.0 * (1 - (i % 2) * 2) / (2 * i + 1)).sum
+
+}
 
 class SimpleTaskExecutionSpecification extends Specification {
 
   "Execute simple task on local member" in {
     distributedTask {
       () => 1 + 1
-    }.onMember(Hazelcast.getCluster.getLocalMember)().get must be equalTo 2
+    }.onMember(Hazelcast.getCluster.getLocalMember)() must be equalTo 2
   }
 
   "Apply transformation to a simple task" in {
@@ -29,7 +37,7 @@ class SimpleTaskExecutionSpecification extends Specification {
       .map {
       x =>
         x * 2
-    }.onMember(Hazelcast.getCluster.getLocalMember)().get must be equalTo 4
+    }.onMember(Hazelcast.getCluster.getLocalMember)() must be equalTo 4
   }
 
   "Apply flattening transformation" in {
@@ -40,10 +48,10 @@ class SimpleTaskExecutionSpecification extends Specification {
       x => distributedTask {
         () => x + 1
       }
-    }.onMember(Hazelcast.getCluster.getLocalMember)().get must be equalTo 2
+    }.onMember(Hazelcast.getCluster.getLocalMember)() must be equalTo 2
   }
 
-  "Reduce tasks in a parallel" in {
+  "Join tasks in a parallel" in {
     val taskA = distributedTask {
       () => 1
     }.onMember(Hazelcast.getCluster.getLocalMember)
@@ -52,7 +60,22 @@ class SimpleTaskExecutionSpecification extends Specification {
       () => "2"
     }.onMember(Hazelcast.getCluster.getLocalMember)
 
-    join(taskA, taskB)(_.toString + _).map(_.toInt).apply().get must be equalTo 12
+    join(taskA, taskB)(_.toString + _).map(_.toInt)() must be equalTo 12
+  }
+
+  "Reduce tasks in a parallel (Pi calculation)" in {
+
+    val result = reduce(
+      Seq.fill(5)(Hazelcast.getCluster.getLocalMember).zipWithIndex.map {
+        case (member, index) =>
+          distributedTask {
+            () => Pi.calculate(index * Pi.N)
+          } onMember member
+      }
+    )(_ + _)()
+
+    result must be closeTo (3.141 +/- 0.001)
+
   }
 
   step {
