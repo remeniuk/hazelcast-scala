@@ -23,11 +23,12 @@ object Promises {
 
   def get[T](id: String) = repository[T].get(id)
 
-  def cleanup(task: DistributedTask[_]) =
+  def cleanup[T](task: DistributedTask[_]) =
     task.context.tasks.values.foreach {
       task =>
         repository[Any].remove(task.id)
-        task.result(values.remove(task.id))
+        val value = values.remove(task.id)
+        if (!task.isInstanceOf[MultiTask[_]]) task.result(value)
     }
 
 

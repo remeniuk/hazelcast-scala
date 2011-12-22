@@ -18,6 +18,18 @@ class MultiTaskSpecification extends Specification {
       .map(_.sum)() must be equalTo membersCount
   }
 
+  "Mapping to a fork/complete multitask" in additionalInstance {
+    val membersCount = HazelcastUtil.clusterMembers.size
+
+    val root = multiTask(HazelcastUtil.clusterMembers)(() => 1)
+
+    val task1 = root.map(_.sum)
+    val task2 = root.map(_.foldLeft(1)(_ * _))
+
+    task1() must be equalTo membersCount
+    task2() must be equalTo 1
+  }
+
   step {
     TestSuite.stopTest
   }

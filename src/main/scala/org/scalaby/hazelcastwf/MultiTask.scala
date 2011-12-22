@@ -36,31 +36,41 @@ case class MultiTask[T](members: Set[Member],
 
   lazy val innerTask = new HazelcastMultiTask[T](Promises.get[Any](id), members)
 
-  override def execute(ctx: Context) = {
-    ctx.getDependecies(this).foreach {
-      dependency =>
-
-        innerTask.setExecutionCallback(new ExecutionCallback[Any] {
-          def done(future: Future[Any]) = {
-            HazelcastUtil.locked("promise:" + dependency.id) {
-              Promises.get[Iterable[T]](dependency.id) match {
-                case promise: PartiallyAppliable[Iterable[T], _] =>
-                  Promises.put(dependency.id, promise.partiallyApply(innerTask.get.asScala))
-                case _ => throw new IllegalStateException("Unsupported promise type!")
-              }
-            }
-            dependency.execute(ctx)
-          }
-        })
-
+  private def partiallyApplyDependency[K](dependency: DistributedTask[_], value: Any, ctx: Context) = {
+    HazelcastUtil.locked("promise:" + dependency.id) {
+      Promises.get[Iterable[T]](dependency.id) match {
+        case promise: PartiallyAppliable[Iterable[T], _] =>
+          Promises.put(dependency.id, promise.partiallyApply(innerTask.get.asScala))
+        case _ => throw new IllegalStateException("Unsupported promise type!")
+      }
     }
+    dependency.execute(ctx)
+  }
 
-    executor.execute(innerTask)
+  private def executeCompleteTask(ctx: Context, value: Any) =
+    ctx.getDependecies(this).foreach(partiallyApplyDependency(_, value, ctx))
+
+  override def execute(ctx: Context) = {
+    result.map(executeCompleteTask(ctx, _))
+      .getOrElse {
+      ctx.getDependecies(this).foreach {
+        dependency =>
+          innerTask.setExecutionCallback(new ExecutionCallback[Any] {
+            def done(future: Future[Any]) = {
+              partiallyApplyDependency(dependency, future.get(), ctx)
+            }
+          })
+      }
+
+      executor.execute(innerTask)
+    }
   }
 
   override def apply() = {
     context.roots.foreach(_.execute(context))
-    innerTask.get().asScala
+    result = Some(innerTask.get().asScala)
+    Promises.cleanup(this)
+    result.get
   }
 
 }
