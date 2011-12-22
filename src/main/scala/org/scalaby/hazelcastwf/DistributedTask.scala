@@ -67,6 +67,11 @@ trait DistributedTask[T] {
 
   val parent: Option[DistributedTask[_]]
 
+  @volatile var result: Option[T] = None
+
+  private[hazelcastwf] def result(value: Any): Unit =
+    result = Some(value.asInstanceOf[T])
+
   implicit val thisTask: Option[DistributedTask[_]] = Some(this)
 
   implicit val context: Context = (parent.map {
@@ -80,34 +85,44 @@ trait DistributedTask[T] {
     else None
   }
 
-  def execute(ctx: Context): Unit =
-    createDistributedTask.map {
-      task =>
+  def isComplete = result.isDefined
 
-        ctx.getDependecies(this).foreach {
-          dependency =>
+  private def executeCompleteTask(ctx: Context, value: T) =
+    ctx.getDependecies(this).foreach(partiallyApplyDependency(_, value, ctx))
 
-            task.setExecutionCallback(new ExecutionCallback[T] {
-              def done(future: Future[T]) = {
-                HazelcastUtil.locked("promise:" + dependency.id) {
-                  Promises.get[T](dependency.id) match {
-                    case promise: PartiallyAppliable[T, _] =>
-                      Promises.put(dependency.id, promise.partiallyApply(future.get))
-                    case _ => throw new IllegalStateException("Unsupported promise type!")
-                  }
-                }
-                dependency.execute(ctx)
-              }
-            })
-
+  private def partiallyApplyDependency[K](dependency: DistributedTask[K], value: T, ctx: Context) = {
+    if (!dependency.isComplete) {
+      HazelcastUtil.locked("promise:" + dependency.id) {
+        Promises.get[T](dependency.id) match {
+          case promise: PartiallyAppliable[T, _] =>
+            Promises.put(dependency.id, promise.partiallyApply(value))
+          case _ => throw new IllegalStateException("Unsupported promise type!")
         }
+      }
+    }
+    dependency.execute(ctx)
+  }
 
-        executor.execute(task)
+  def execute(ctx: Context): Unit =
+    result.map(executeCompleteTask(ctx, _))
+      .getOrElse {
+      createDistributedTask.map {
+        task =>
+          ctx.getDependecies(this).foreach {
+            dependency =>
+              task.setExecutionCallback(new ExecutionCallback[T] {
+                def done(future: Future[T]) = partiallyApplyDependency(dependency, future.get, ctx)
+              })
+          }
+          executor.execute(task)
+      }
     }
 
-  def apply() = {
+  def apply(): T = {
     context.roots.foreach(_.execute(context))
-    Promises.get[T](id).get
+    result = Some(Promises.get[T](id).get)
+    Promises.cleanup(this)
+    result.get
   }
 
   def get = apply()

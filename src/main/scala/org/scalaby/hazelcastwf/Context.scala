@@ -20,7 +20,10 @@ case class Context(dependencies: Map[String, Seq[String]] = Map(), tasks: Map[St
         deps.flatMap(dep => tasks.get(dep))
     } getOrElse (Seq())
 
-  def roots = tasks.values.toSeq.diff(dependencies.values.flatten.toSeq)
+  def roots = {
+    val depTasks = dependencies.values.flatten.toSeq
+    tasks.filterNot(e => depTasks.contains(e._1)).values
+  }
 
   def join(that: Context) = Context(
     (this.dependencies.keys ++ that.dependencies.keys)

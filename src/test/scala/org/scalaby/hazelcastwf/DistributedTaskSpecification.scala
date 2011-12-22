@@ -4,6 +4,7 @@ import com.hazelcast.core.Hazelcast
 import org.specs2.mutable.Specification
 import DistributedTask._
 import scala.collection.JavaConverters._
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * User: remeniuk
@@ -87,6 +88,38 @@ class DistributedTaskSpecification extends Specification {
     )(_ + _)()
 
     result must be closeTo (3.141 +/- 0.001)
+
+  }
+
+  "Mapping to a fork/complete task" in {
+
+    val callsCount = Hazelcast.getAtomicNumber("mapping-to-a-complete-task")
+
+    val root = distributedTask {
+      () =>
+        callsCount.incrementAndGet()
+        1
+    }
+
+    val task1 = root.map {
+      x =>
+        callsCount.incrementAndGet()
+        "r:" + x.toString
+    }
+
+    val task2 = root.map {
+      x =>
+        x * 2
+    }
+
+    task1() must be equalTo "r:1"
+    task2() must be equalTo 2
+    callsCount.get() must be equalTo 2
+
+    task2.map {
+      x =>
+        x * 2
+    }() must be equalTo 4
 
   }
 
