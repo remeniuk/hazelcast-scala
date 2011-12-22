@@ -18,7 +18,11 @@ object Pi {
 
 }
 
-class SimpleTaskExecutionSpecification extends Specification {
+class DistributedTaskSpecification extends Specification {
+
+  step {
+    TestSuite.startTest
+  }
 
   "Execute simple task on local member" in {
     distributedTask {
@@ -71,7 +75,7 @@ class SimpleTaskExecutionSpecification extends Specification {
       .map(_.toDouble)() must be equalTo 3d
   }
 
-  "Reduce tasks in a parallel (Pi calculation)" in {
+  "Reduce tasks in a parallel (Pi calculation)" in additionalInstance {
 
     val result = reduce(
       HazelcastUtil.clusterMembersList.zipWithIndex.map {
@@ -86,13 +90,8 @@ class SimpleTaskExecutionSpecification extends Specification {
 
   }
 
-  "Reduce multitask" in new additionalInstance {
-    multiTask(HazelcastUtil.clusterMembers)(() => 1)
-      .map(_.sum)() must be equalTo 2
-  }
-
   step {
-    Hazelcast.shutdownAll()
+    TestSuite.stopTest
   }
 
 }
