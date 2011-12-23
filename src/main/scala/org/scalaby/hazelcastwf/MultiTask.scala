@@ -8,8 +8,10 @@ import scala.collection.JavaConverters._
  * User: remeniuk
  */
 
-class HazelcastMultiTask[T](callable: Callable[Any], members: Set[Member])
-  extends HazelcastDistributedTask[Any](callable, members.asJava) {
+class HazelcastMultiTask[T](id: String, callable: Callable[Any], members: Set[Member])
+  extends HazelcastDistributedTask[Any](callable, members.asJava) with TaskCancellation {
+
+  val topicId = id
 
   protected var results = new CopyOnWriteArrayList[T]
 
@@ -34,7 +36,7 @@ case class MultiTask[T](members: Set[Member],
 
   import DistributedTask._
 
-  lazy val innerTask = new HazelcastMultiTask[T](Promises.get[Any](id), members)
+  lazy val innerTask = new HazelcastMultiTask[T](id, Promises.get[Any](id), members)
 
   private def partiallyApplyDependency[K](dependency: DistributedTask[_], value: Any, ctx: Context) = {
     HazelcastUtil.locked("promise:" + dependency.id) {
@@ -66,11 +68,15 @@ case class MultiTask[T](members: Set[Member],
     }
   }
 
-  override def apply() = {
-    context.roots.foreach(_.execute(context))
-    result = Some(innerTask.get().asScala)
+  private def innerGet(f: => Iterable[T], cancelOnTimeout: Boolean = false): Iterable[T] = result.getOrElse {
+    apply()
+    result = Some(f)
     Promises.cleanup(this)
     result.get
   }
+
+  override def get: Iterable[T] = innerGet(innerTask.get.asScala)
+
+  override def get(timeout: Long, unit: TimeUnit): Iterable[T] = innerGet(innerTask.get(timeout, unit).asScala)
 
 }

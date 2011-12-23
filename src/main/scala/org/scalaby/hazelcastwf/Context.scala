@@ -1,12 +1,17 @@
 package org.scalaby.hazelcastwf
 
+import java.util.concurrent.TimeUnit
+
 /**
  * User: remeniuk
  */
 
-case class Context(dependencies: Map[String, Seq[String]] = Map(), tasks: Map[String, DistributedTask[_]] = Map()) {
+case class Context(dependencies: Map[String, Seq[String]] = Map(),
+                   tasks: Map[String, DistributedTask[_]] = Map()) {
 
-  def addTask(task: DistributedTask[_]) =
+import java.util.concurrent.TimeUnit
+
+def addTask(task: DistributedTask[_]) =
     copy(tasks = tasks + (task.id -> task))
 
   def addDependency(from: DistributedTask[_], to: DistributedTask[_]) = {
@@ -25,11 +30,12 @@ case class Context(dependencies: Map[String, Seq[String]] = Map(), tasks: Map[St
     tasks.filterNot(e => depTasks.contains(e._1)).values
   }
 
-  def join(that: Context) = Context(
-    (this.dependencies.keys ++ that.dependencies.keys)
+  def join(that: Context) = copy(
+    dependencies = (this.dependencies.keys ++ that.dependencies.keys)
       .map {
       key => key -> (this.dependencies.get(key).getOrElse(Seq()) ++ that.dependencies.get(key).getOrElse(Seq()))
     }.toMap,
-    this.tasks ++ that.tasks)
+    tasks = this.tasks ++ that.tasks
+  )
 
 }

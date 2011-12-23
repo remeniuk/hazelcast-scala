@@ -22,8 +22,13 @@ trait Promise[T] extends Callable[T] with Serializable {
     c
   }
 
+  def get(timeout: Long, unit: TimeUnit) = {
+    countDownLatch.await(timeout, unit)
+    Promises.getResult[T](taskId)
+  }
+
   def get = {
-    countDownLatch.await(5, TimeUnit.SECONDS)
+    countDownLatch.await()
     Promises.getResult[T](taskId)
   }
 

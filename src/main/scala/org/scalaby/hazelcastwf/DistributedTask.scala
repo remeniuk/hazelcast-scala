@@ -1,8 +1,9 @@
 package org.scalaby.hazelcastwf
 
-import com.hazelcast.core.{ExecutionCallback, Member, Hazelcast, DistributedTask => HazelcastDistributedTask}
 import com.google.common.base.Objects
-import java.util.concurrent.Future
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.{TimeUnit, CountDownLatch, Future}
+import com.hazelcast.core.{MessageListener, ExecutionCallback, Member, Hazelcast, DistributedTask => HazelcastDistributedTask}
 
 /**
  * User: remeniuk
@@ -33,31 +34,31 @@ object DistributedTask {
   }
 
   def reduce[T](tasks: Iterable[DistributedTask[T]])(f: (T, T) => T): DistributedTask[T] = {
-    val res = new ExecuteTaskRandomly[T]() {
-      override implicit val context =
-        ((tasks.head.context /: tasks.tail) {
-          (c, x) => c.join(x.context).addDependency(x, this)
-        }).addDependency(tasks.head, this).addTask(this)
-    }
+    val res = new ExecuteTaskRandomly[T]()
+
     Promises.put(res.id, new FoldablePromise[T](res.id, f, tasks.size))
 
-    res
+    res.withContext(((tasks.head.context /: tasks.tail) {
+      (c, x) => c.join(x.context).addDependency(x, res)
+    }).addDependency(tasks.head, res).addTask(res))
   }
 
   def join[A, B: Manifest, C](a: DistributedTask[A], b: DistributedTask[B])(f: (A, B) => C): DistributedTask[C] = {
-    val res = new ExecuteTaskRandomly[C]() {
-      override implicit val context =
-        (a.context join b.context)
-          .addDependency(a, this)
-          .addDependency(b, this)
-          .addTask(this)
-    }
+    val res = new ExecuteTaskRandomly[C]()
+
     Promises.put(res.id, new Promise2[A, B, C](res.id, f))
 
-    res
+    res.withContext((a.context join b.context)
+      .addDependency(a, res)
+      .addDependency(b, res)
+      .addTask(res))
   }
 
 }
+
+sealed trait TaskExecutionMessage
+
+case object CancelTask extends TaskExecutionMessage
 
 trait DistributedTask[T] {
 
@@ -67,21 +68,25 @@ trait DistributedTask[T] {
 
   val parent: Option[DistributedTask[_]]
 
-  @volatile var result: Option[T] = None
+  @volatile protected var result: Option[T] = None
+  private val applied = new AtomicBoolean(false)
 
   private[hazelcastwf] def result(value: Any): Unit =
     result = Some(value.asInstanceOf[T])
 
   implicit val thisTask: Option[DistributedTask[_]] = Some(this)
 
-  implicit val context: Context = (parent.map {
+  @volatile implicit var context: Context = (parent.map {
     p => p.context.addDependency(p, this)
   } getOrElse (Context()))
     .addTask(this)
 
   def createDistributedTask = {
     val promise = Promises.get[T](id)
-    if (promise.isCallable) Some(new HazelcastDistributedTask[T](promise))
+    if (promise.isCallable) Some(
+      new HazelcastDistributedTask[T](promise) with TaskCancellation {
+        val topicId = id
+      })
     else None
   }
 
@@ -109,6 +114,7 @@ trait DistributedTask[T] {
       createDistributedTask.map {
         task =>
           ctx.getDependecies(this).foreach {
+            // FIXME: task can take only one callback. callbacks for different dependencies should be combined
             dependency =>
               task.setExecutionCallback(new ExecutionCallback[T] {
                 def done(future: Future[T]) = partiallyApplyDependency(dependency, future.get, ctx)
@@ -118,14 +124,26 @@ trait DistributedTask[T] {
       }
     }
 
-  def apply(): T = {
-    context.roots.foreach(_.execute(context))
-    result = Some(Promises.get[T](id).get)
+  def apply(): DistributedTask[T] = {
+    if (applied.compareAndSet(false, true))
+      context.roots.foreach(_.execute(context))
+    this
+  }
+
+  protected def get(f: Promise[T] => T, cancelOnTimeout: Boolean = false): T = result.getOrElse {
+    apply()
+    result = Some(f(Promises.get[T](id)))
     Promises.cleanup(this)
     result.get
   }
 
-  def get = apply()
+  def get: T = get(promise => promise.get)
+
+  def get(timeout: Long, unit: TimeUnit): T = get(promise => promise.get(timeout, unit))
+
+  def cancel() = TaskCancellation.cancel(id)
+
+  def cancelAll() = context.tasks.keys.foreach(TaskCancellation.cancel)
 
   def onMember(member: Member): DistributedTask[T] = ExecuteDistributedTaskOnMember[T](member, id)(parent)
 
@@ -139,7 +157,7 @@ trait DistributedTask[T] {
     val unflattenedTask = ExecuteTaskRandomly[DistributedTask[V]]()
     val flattenedTask = ExecuteTaskRandomly[V]()(Some(unflattenedTask))
 
-    Promises.put(flattenedTask.id, new Promise1[DistributedTask[V], V](flattenedTask.id, _()))
+    Promises.put(flattenedTask.id, new Promise1[DistributedTask[V], V](flattenedTask.id, _.get))
 
     Promises.put(unflattenedTask.id, new Promise1[T, DistributedTask[V]](unflattenedTask.id, f))
 
@@ -158,6 +176,11 @@ trait DistributedTask[T] {
 
   override def toString = id
 
+  def withContext(ctx: Context) = {
+    context = ctx
+    this
+  }
+
 }
 
 case class ExecuteTaskRandomly[T](implicit parent: Option[DistributedTask[_]] = None) extends DistributedTask[T]
@@ -169,7 +192,9 @@ case class ExecuteDistributedTaskOnMember[T](member: Member,
 
   override def createDistributedTask = {
     val promise = Promises.get[T](id)
-    if (promise.isInstanceOf[Promise0[_]]) Some(new HazelcastDistributedTask[T](promise, member))
+    if (promise.isInstanceOf[Promise0[_]]) Some(new HazelcastDistributedTask[T](promise, member) with TaskCancellation {
+      val topicId = id
+    })
     else None
   }
 
