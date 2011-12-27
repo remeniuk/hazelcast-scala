@@ -56,10 +56,6 @@ object DistributedTask {
 
 }
 
-sealed trait TaskExecutionMessage
-
-case object CancelTask extends TaskExecutionMessage
-
 trait DistributedTask[T] {
 
   import DistributedTask._
@@ -85,7 +81,7 @@ trait DistributedTask[T] {
     val promise = Promises.get[T](id)
     if (promise.isCallable) Some(
       new HazelcastDistributedTask[T](promise) with TaskCancellation {
-        val topicId = id
+        override lazy val topicId = id
       })
     else None
   }
@@ -193,7 +189,7 @@ case class ExecuteDistributedTaskOnMember[T](member: Member,
   override def createDistributedTask = {
     val promise = Promises.get[T](id)
     if (promise.isInstanceOf[Promise0[_]]) Some(new HazelcastDistributedTask[T](promise, member) with TaskCancellation {
-      val topicId = id
+      override lazy val topicId = id
     })
     else None
   }

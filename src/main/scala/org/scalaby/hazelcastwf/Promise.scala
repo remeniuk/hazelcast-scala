@@ -1,8 +1,8 @@
 package org.scalaby.hazelcastwf
 
 import com.hazelcast.core.Hazelcast
-import java.util.concurrent.{TimeUnit, Callable}
 import com.hazelcast.impl.CountDownLatchProxy
+import java.util.concurrent.{TimeoutException, TimeUnit, Callable}
 
 /**
  * User: remeniuk
@@ -23,7 +23,8 @@ trait Promise[T] extends Callable[T] with Serializable {
   }
 
   def get(timeout: Long, unit: TimeUnit) = {
-    countDownLatch.await(timeout, unit)
+    if (!countDownLatch.await(timeout, unit))
+      throw new TimeoutException("Promise has timeouted!")
     Promises.getResult[T](taskId)
   }
 

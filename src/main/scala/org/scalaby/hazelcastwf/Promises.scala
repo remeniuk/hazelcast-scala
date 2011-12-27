@@ -27,6 +27,7 @@ object Promises {
     task.context.tasks.values.foreach {
       task =>
         repository[Any].remove(task.id)
+        TaskCancellation.removeListener(task.id)
         val value = values.remove(task.id)
         if (!task.isInstanceOf[MultiTask[_]]) task.result(value)
     }

@@ -7,13 +7,26 @@ import com.hazelcast.core.{Hazelcast, MessageListener, DistributedTask => Hazelc
  * User: remeniuk
  */
 
+sealed trait TaskExecutionMessage
+
+case object RemoveTaskListener extends TaskExecutionMessage
+
+case object CancelTask extends TaskExecutionMessage
+
 object TaskCancellation {
 
   val TASK_CHANNEL_PREFIX = "task-channel:"
 
   private def taskTopic(id: String) = Hazelcast.getTopic[TaskExecutionMessage](TASK_CHANNEL_PREFIX + id)
 
-  def cancel(id: String) = taskTopic(id).publish(CancelTask)
+  def removeListener(id: String) = sendMessageToTaskListener(id, RemoveTaskListener)
+
+  def cancel(id: String) = {
+    sendMessageToTaskListener(id, CancelTask)
+  }
+
+  private def sendMessageToTaskListener(id: String, message: TaskExecutionMessage) =
+    taskTopic(id).publish(CancelTask)
 
 }
 
@@ -22,14 +35,18 @@ trait TaskCancellation extends MessageListener[TaskExecutionMessage] {
 
   import TaskCancellation._
 
-  val topicId: String
+  lazy val topicId: String = ""
 
   taskTopic(topicId).addMessageListener(this)
 
+  private def removeTaskListener = taskTopic(topicId).removeMessageListener(this)
+
   def onMessage(message: TaskExecutionMessage) = message match {
+    case RemoveTaskListener =>
+      removeTaskListener
     case CancelTask =>
       this.cancel(true)
-      taskTopic(topicId).removeMessageListener(this)
+      removeTaskListener
   }
 
 }

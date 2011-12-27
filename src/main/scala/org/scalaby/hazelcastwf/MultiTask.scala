@@ -11,7 +11,7 @@ import scala.collection.JavaConverters._
 class HazelcastMultiTask[T](id: String, callable: Callable[Any], members: Set[Member])
   extends HazelcastDistributedTask[Any](callable, members.asJava) with TaskCancellation {
 
-  val topicId = id
+  override lazy val topicId = id
 
   protected var results = new CopyOnWriteArrayList[T]
 

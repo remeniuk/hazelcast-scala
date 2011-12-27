@@ -21,9 +21,11 @@ object TestSuite {
 
   def startTest = runningTests.addAndGet(1)
 
-  def stopTest =
-    if (runningTests.decrementAndGet() == 0)
+  def stopTest = {
+    if (runningTests.decrementAndGet() == 0) {
       Hazelcast.shutdownAll()
+    }
+  }
 
 }
 
