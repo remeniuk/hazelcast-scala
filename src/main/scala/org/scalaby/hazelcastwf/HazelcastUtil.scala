@@ -20,6 +20,8 @@ object HazelcastUtil {
     }
   }
 
+  def local: Member = Hazelcast.getCluster.getLocalMember
+
   def clusterMembers: Set[Member] = Hazelcast.getCluster.getMembers.asScala.toSet
 
   def clusterMembersList: List[Member] = clusterMembers.toList
