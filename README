@@ -4,7 +4,11 @@ API for Hazelcast in Scala that will add abstractions for working in concurrent 
 environment in a functional manner (distributed dataflow, actors backed with Hazelcast executors),
 and functional wrappers for Hazelcast distributed collections.
 
-EXAMPLE. Distributed PI calculation on a cluster.
+==================================================================================================
+
+================== EXAMPLE. Distributed PI calculation on a cluster. =============================
+
+==================================================================================================
 
 object Pi {
 
@@ -29,5 +33,32 @@ object Pi {
   result.get must be closeTo (3.141 +/- 0.001)
 
 }
+
+==================================================================================================
+
+==================================== EXAMPLE. Chaining tasks =====================================
+
+==================================================================================================
+
+
+"Join tasks in a parallel" in {
+  val taskA = distributedTask {
+    () => 1
+  }.onMember(Hazelcast.getCluster.getLocalMember)
+
+  val taskB = distributedTask {
+    () => "2"
+  }.onMember(Hazelcast.getCluster.getLocalMember)
+
+  val taskC = distributedTask {
+    () => 1
+  }.onMember(Hazelcast.getCluster.getLocalMember)
+
+  taskA
+    .join(taskB)(_.toString + _)
+    .join(taskC)(_.length + _)
+    .map(_.toDouble)().get must be equalTo 3d
+}
+
 
 You can find more exciting examples in specs (https://github.com/remeniuk/hazelcast-scala/tree/master/src/test/scala/org/scalaby/hazelcastwf).
