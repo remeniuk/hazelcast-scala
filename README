@@ -61,4 +61,6 @@ object Pi {
 }
 
 
+==================================================================================================
+
 You can find more exciting examples in specs (https://github.com/remeniuk/hazelcast-scala/tree/master/src/test/scala/org/scalaby/hazelcastwf).
